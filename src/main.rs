@@ -1,12 +1,13 @@
+#![windows_subsystem = "windows"]
+
+use single_instance::SingleInstance;
+use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;
-use std::time::SystemTime;
-
-use softbuffer::{Context, Surface};
+use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::raw_window_handle::{DisplayHandle, HasWindowHandle};
 use winit::window::{Window, WindowId};
 
 struct Group {
@@ -15,9 +16,18 @@ struct Group {
     surface: Surface<Rc<Window>, Rc<Window>>,
 }
 
-#[derive(Default)]
 struct App {
     groups: Vec<Group>,
+    started_at: Instant,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            groups: Default::default(),
+            started_at: Instant::now(),
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -71,11 +81,30 @@ impl ApplicationHandler for App {
                     buffer.present().unwrap();
                 }
             }
-            WindowEvent::KeyboardInput { event: asd, .. } => {
-                if asd.text == None {
+            WindowEvent::KeyboardInput {
+                event: kb_event, ..
+            } => {
+                use winit::keyboard::{Key, NamedKey};
+
+                let is_esc = kb_event.logical_key == Key::Named(NamedKey::Escape);
+
+                // Wait a bit before letting keyboard input close the window, because
+                // if you use a shortcut to start this program but hold the shortcut
+                // too long, the window immediately closes as your keyboard key is down
+                //
+                // ... Unless it's the Esc key
+                if !is_esc {
+                    let time_since_start = Instant::now().duration_since(self.started_at);
+                    if time_since_start < Duration::from_secs_f32(2.0) {
+                        return;
+                    }
+                }
+
+                // Ignore modifier keys
+                if !is_esc && kb_event.text == None {
                     return;
                 }
-                println!("Keyboard event received; stopping {:?}", &event);
+                println!("Keyboard event received; stopping {:?}", &kb_event);
                 event_loop.exit();
             }
             WindowEvent::MouseInput { .. } => {
@@ -89,6 +118,9 @@ impl ApplicationHandler for App {
 }
 
 fn main() -> anyhow::Result<()> {
+    let instance = SingleInstance::new("whiteout-xwmzdj98").unwrap();
+    assert!(instance.is_single());
+
     let event_loop = EventLoop::new().unwrap();
 
     // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
